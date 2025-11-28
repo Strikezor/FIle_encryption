@@ -1,1 +1,78 @@
+import org.bouncycastle.bcpg.ArmoredOutputStream; 
+// ... other imports remain the same
+
+public static void signAndEncryptFile(
+        InputStream inputStream, 
+        OutputStream outputStream, 
+        String fileName,
+        PGPPublicKey npciPublicKey, 
+        PGPPrivateKey yourPrivateKey) 
+        throws Exception {
+    
+    Security.addProvider(new BouncyCastleProvider());
+
+    // 1. Create Armored Output Stream (This makes the output text-readable)
+    // We wrap the file output stream in this armor stream.
+    try (ArmoredOutputStream armoredOutputStream = new ArmoredOutputStream(outputStream)) {
+        
+        // 2. Init Encryption Generator (AES-256)
+        PGPEncryptedDataGenerator encryptedDataGenerator = new PGPEncryptedDataGenerator(
+                new JcePGPDataEncryptorBuilder(PGPEncryptedData.AES_256)
+                .setWithIntegrityPacket(true)
+                .setSecureRandom(new SecureRandom())
+                .setProvider("BC"));
+    
+        encryptedDataGenerator.addMethod(new JcePublicKeyKeyEncryptionMethodGenerator(npciPublicKey).setProvider("BC"));
+    
+        // 3. Init Compression Generator (ZIP)
+        PGPCompressedDataGenerator compressedDataGenerator = new PGPCompressedDataGenerator(PGPCompressedData.ZIP);
+    
+        try (
+            // Chain: Armor -> Encrypt -> Compress
+            OutputStream encryptedOut = encryptedDataGenerator.open(armoredOutputStream, new byte[4096]);
+            OutputStream compressedOut = compressedDataGenerator.open(encryptedOut)
+        ) {
+            // 4. Init Signature Generator
+            PGPSignatureGenerator signatureGenerator = new PGPSignatureGenerator(
+                    new JcaPGPContentSignerBuilder(yourPrivateKey.getPublicKeyPacket().getAlgorithm(), PGPUtil.SHA256)
+                    .setProvider("BC"));
+            
+            signatureGenerator.init(PGPSignature.BINARY_DOCUMENT, yourPrivateKey);
+            
+            Iterator<String> it = yourPrivateKey.getPublicKeyPacket().getUserIds();
+            if (it.hasNext()) {
+                PGPSignatureSubpacketGenerator spGen = new PGPSignatureSubpacketGenerator();
+                spGen.setSignerUserID(false, it.next());
+                signatureGenerator.setHashedSubpackets(spGen.generate());
+            }
+            signatureGenerator.generateOnePassVersion(false).encode(compressedOut);
+    
+            // 5. Init Literal Data Generator (The actual file content)
+            PGPLiteralDataGenerator literalDataGenerator = new PGPLiteralDataGenerator();
+            
+            try (
+                OutputStream literalOut = literalDataGenerator.open(
+                    compressedOut, 
+                    PGPLiteralData.BINARY, 
+                    fileName, 
+                    new Date(), 
+                    new byte[4096])
+            ) {
+                // 6. Read Input File and Write to PGP Stream
+                byte[] buffer = new byte[4096];
+                int len;
+                while ((len = inputStream.read(buffer)) > 0) {
+                    literalOut.write(buffer, 0, len);
+                    signatureGenerator.update(buffer, 0, len);
+                }
+            } 
+    
+            // 7. Append the Signature
+            signatureGenerator.generate().encode(compressedOut);
+        }
+        
+        // Only close the generator wrappers, let try-with-resources handle streams
+        encryptedDataGenerator.close();
+    }
+}
 
