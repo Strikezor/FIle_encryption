@@ -1,31 +1,159 @@
+package com.tcs.sbi.main;
 
-// Inside your run() loop in ACHEncryptionMain.java
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.Date;
 
-String sourceFile = Fullpath + File.separator + file;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartFile;
 
-// CHANGE: Explicitly naming the output file with .txt extension
-String destFile = ACHEncryptionLuncher.getDestinationFilePath() + File.separator + file + ".txt"; 
+import com.tcs.sbi.constants.ErrrorConstants;
+import com.tcs.sbi.dbConnection.ACH_Manager;
+import com.tcs.sbi.launcher.ACHEncryptionLuncher;
+import com.tcs.sbi.util.ACHEncryptionUtility;
+import com.tcs.sbi.util.SFTPUtility;
 
-try (
-    InputStream fileInputStream = new BufferedInputStream(new FileInputStream(sourceFile));
-    OutputStream fileOutputStream = new BufferedOutputStream(new FileOutputStream(destFile))
-) {
-    log.info("Starting PGP Sign and Encrypt (ASCII Armored) for: " + file);
+public class ACHEncryptionMain implements Runnable {
 
-    // CALL THE METHOD
-    ACHEncryptionUtility.signAndEncryptFile(
-        fileInputStream,
-        fileOutputStream,
-        file,                                       // Internal filename
-        ACHEncryptionLuncher.getChannelpgpPubkey(), // NPCI Public Key (from .cer)
-        ACHEncryptionLuncher.getPgpPrivKey()        // YOUR Private Key (from .pfx)
-    );
-    
-    log.info("File successfully Encrypted to .txt format: " + destFile);
-    
-    // ... proceed with existing logic (backup, SFTP, etc.) ...
+	private ArrayList<String> fileList;
+	@SuppressWarnings("unused")
+	private String folder;
+	@SuppressWarnings("unused")
+	private String fileNameParam;
 
-} catch (Exception e) {
-    log.error("Error during encryption process", e);
-    // ... handle failure ...
+	public ACHEncryptionMain(ArrayList<String> fileList, String folderName, String fileName) {
+		this.fileList = fileList;
+		this.folder = folderName;
+		this.fileNameParam = fileName;
+	}
+
+	private static final Logger log = LogManager.getLogger(ACHEncryptionLuncher.class);
+
+	public void run() {
+		Calendar cal = Calendar.getInstance();
+		int calMonth = cal.get(Calendar.MONTH) + 1;
+		int calYear = cal.get(Calendar.YEAR);
+		int calDate = cal.get(Calendar.DATE);
+		String currMonth = (calMonth < 10) ? "0" + calMonth : "" + calMonth;
+		String currentDate = (calDate < 10) ? "0" + calDate : "" + calDate;
+
+		String fullPath = ACHEncryptionLuncher.getSourcePath();
+
+		if (fileList.size() > 0) {
+			for (String file : fileList) {
+				log.info("Processing File: " + file);
+				HashMap<String, Object> encdmap = new HashMap<>();
+				String referenceNumber = ACHEncryptionUtility.generateRefrenceNumber();
+				encdmap.put("RefrenceNumber", referenceNumber);
+				encdmap.put("FileName", file);
+				encdmap.put("fileCopiedTime", ACHEncryptionUtility.getTimestamp());
+				encdmap.put("FileType", file.contains("-CR-") ? ErrrorConstants.CR_FILE_TYPE.toString() : ErrrorConstants.DR_FILE_TYPE.toString());
+
+				String sourceFile = fullPath + File.separator + file;
+				// Output is .txt (ASCII Armored)
+				String destFile = ACHEncryptionLuncher.getDestinationFilePath() + File.separator + file + ".txt";
+
+				try (
+					InputStream fileInputStream = new BufferedInputStream(new FileInputStream(sourceFile));
+					OutputStream fileOutputStream = new BufferedOutputStream(new FileOutputStream(destFile))
+				) {
+					// --- SINGLE STEP: SIGN & ENCRYPT STREAM ---
+					ACHEncryptionUtility.signAndEncryptFile(
+						fileInputStream,
+						fileOutputStream,
+						file, // Internal filename
+						ACHEncryptionLuncher.getChannelpgpPubkey(), // Encrypt with NPCI Key
+						ACHEncryptionLuncher.getPgpPrivKey()        // Sign with My Key
+					);
+
+					log.info("Encryption Success: " + destFile);
+					
+					// Update DB
+					encdmap.put("Status", ErrrorConstants.ENCRYPTION_SUCCESS.toString());
+					encdmap.put("lastUpdatedtime", ACHEncryptionUtility.getTimestamp());
+					
+					// 1. Move Encrypted file to Backup
+					File encryptedBackup = new File(ACHEncryptionLuncher.getEncryptedBackupPath() + currentDate + currMonth + calYear);
+					if (!encryptedBackup.exists()) encryptedBackup.mkdirs();
+					
+					Path destPathObj = Paths.get(destFile);
+					Files.copy(destPathObj, Paths.get(encryptedBackup + File.separator + file + ".txt"), StandardCopyOption.REPLACE_EXISTING);
+
+					// 2. Handle Upload (CR vs DR)
+					Path finalDestPath;
+					String sftpUploadPath;
+					
+					if (file.contains("CR")) {
+						finalDestPath = Paths.get(ACHEncryptionLuncher.getCrdestfilepath(), file + ".txt");
+						sftpUploadPath = ACHEncryptionLuncher.getOrgndestpathcr();
+					} else {
+						finalDestPath = Paths.get(ACHEncryptionLuncher.getDrdestfilepath(), file + ".txt");
+						sftpUploadPath = ACHEncryptionLuncher.getOrgndestpathdr();
+					}
+
+					Files.copy(destPathObj, finalDestPath, StandardCopyOption.REPLACE_EXISTING);
+					
+					// Upload logic
+					File fileToUpload = finalDestPath.toFile();
+					try (FileInputStream input = new FileInputStream(fileToUpload)) {
+						MultipartFile multipartFile = new MockMultipartFile("file", fileToUpload.getName(), "text/plain", input);
+						
+						if (SFTPUtility.getsftpConnectiontoRemote()) {
+							if (SFTPUtility.upload(sftpUploadPath, multipartFile)) {
+								log.info("SFTP Upload Success");
+								fileToUpload.delete(); // Delete local copy after upload
+							} else {
+								log.info("SFTP Upload Failed");
+							}
+							SFTPUtility.disconnect();
+						}
+					}
+
+					// 3. Move Original Source File to Backup
+					File originalBackup = new File(ACHEncryptionLuncher.getOriginalFileBackupPath() + currentDate + currMonth + calYear);
+					if (!originalBackup.exists()) originalBackup.mkdirs();
+					
+					Files.move(Paths.get(sourceFile), Paths.get(originalBackup + File.separator + file), StandardCopyOption.REPLACE_EXISTING);
+					
+					// 4. Delete Temporary Encrypted File from Destination
+					Files.deleteIfExists(destPathObj);
+
+				} catch (Exception e) {
+					log.error("Encryption Process Failed for " + file, e);
+					
+					// Failure Handling
+					encdmap.put("Status", ErrrorConstants.ENCRYPTION_FAILURE.toString());
+					encdmap.put("ERROR_CODE", ErrrorConstants.ER004.name());
+					
+					File failedPath = new File(ACHEncryptionLuncher.getEncryptionProcessFailed() + currentDate + currMonth + calYear);
+					if (!failedPath.exists()) failedPath.mkdirs();
+					
+					try {
+						Files.move(Paths.get(sourceFile), Paths.get(failedPath + File.separator + file), StandardCopyOption.REPLACE_EXISTING);
+					} catch (IOException io) {
+						log.error("Failed to move file to error folder", io);
+					}
+				}
+
+				// Final DB Update
+				ACH_Manager.insertintoAch_CR_logs(encdmap, new Date());
+
+			}
+		}
+	}
 }
