@@ -1,14 +1,11 @@
 package com.tcs.sbi.util;
 
 import java.io.FileInputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
-import java.security.InvalidAlgorithmParameterException;
-import java.security.InvalidKeyException;
+import java.math.BigInteger;
 import java.security.KeyStore;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.security.Security;
 import java.security.cert.CertificateFactory;
@@ -16,14 +13,9 @@ import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
 import java.util.Base64;
 import java.util.Date;
-import java.util.Iterator;
 import java.util.UUID;
-import java.math.BigInteger;
 
-import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
-import javax.crypto.IllegalBlockSizeException;
-import javax.crypto.NoSuchPaddingException;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -42,12 +34,10 @@ import org.bouncycastle.openpgp.PGPPrivateKey;
 import org.bouncycastle.openpgp.PGPPublicKey;
 import org.bouncycastle.openpgp.PGPSignature;
 import org.bouncycastle.openpgp.PGPSignatureGenerator;
-import org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator;
 import org.bouncycastle.openpgp.PGPUtil;
 import org.bouncycastle.openpgp.operator.jcajce.JcaPGPContentSignerBuilder;
 import org.bouncycastle.openpgp.operator.jcajce.JcaPGPKeyConverter;
 import org.bouncycastle.openpgp.operator.jcajce.JcaPGPKeyPair;
-import org.bouncycastle.openpgp.operator.jcajce.JcePBESecretKeyDecryptorBuilder;
 import org.bouncycastle.openpgp.operator.jcajce.JcePGPDataEncryptorBuilder;
 import org.bouncycastle.openpgp.operator.jcajce.JcePublicKeyKeyEncryptionMethodGenerator;
 
@@ -92,13 +82,8 @@ public class ACHEncryptionUtility {
 
 				signatureGenerator.init(PGPSignature.BINARY_DOCUMENT, signKey);
 
-				// Add User ID to Signature
-				Iterator<String> it = signKey.getPublicKeyPacket().getUserIds();
-				if (it.hasNext()) {
-					PGPSignatureSubpacketGenerator spGen = new PGPSignatureSubpacketGenerator();
-					spGen.setSignerUserID(false, it.next());
-					signatureGenerator.setHashedSubpackets(spGen.generate());
-				}
+				// --- REMOVED USER ID BLOCK HERE (Not required for functionality and was causing error) ---
+
 				// Write One-Pass Signature Header
 				signatureGenerator.generateOnePassVersion(false).encode(compressedOut);
 
@@ -158,7 +143,7 @@ public class ACHEncryptionUtility {
 		return converter.getPGPPublicKey(PGPPublicKey.RSA_GENERAL, javaPublicKey, new Date());
 	}
 
-	// --- Existing Helpers needed for Launcher ---
+	// --- Existing Helpers ---
 
 	public static String aesDecrypt(String key, String initVector, String encrypted) {
 		try {
