@@ -1,1 +1,31 @@
 
+// Inside your run() loop in ACHEncryptionMain.java
+
+String sourceFile = Fullpath + File.separator + file;
+
+// CHANGE: Explicitly naming the output file with .txt extension
+String destFile = ACHEncryptionLuncher.getDestinationFilePath() + File.separator + file + ".txt"; 
+
+try (
+    InputStream fileInputStream = new BufferedInputStream(new FileInputStream(sourceFile));
+    OutputStream fileOutputStream = new BufferedOutputStream(new FileOutputStream(destFile))
+) {
+    log.info("Starting PGP Sign and Encrypt (ASCII Armored) for: " + file);
+
+    // CALL THE METHOD
+    ACHEncryptionUtility.signAndEncryptFile(
+        fileInputStream,
+        fileOutputStream,
+        file,                                       // Internal filename
+        ACHEncryptionLuncher.getChannelpgpPubkey(), // NPCI Public Key (from .cer)
+        ACHEncryptionLuncher.getPgpPrivKey()        // YOUR Private Key (from .pfx)
+    );
+    
+    log.info("File successfully Encrypted to .txt format: " + destFile);
+    
+    // ... proceed with existing logic (backup, SFTP, etc.) ...
+
+} catch (Exception e) {
+    log.error("Error during encryption process", e);
+    // ... handle failure ...
+}
