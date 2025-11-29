@@ -1,0 +1,65 @@
+package com.tcs.bancs.microservices.configuration;
+
+// ... imports remain the same ...
+
+import com.tcs.bancs.microservices.Encryption.AESEncryptionUtility;
+// ... other imports
+
+@Configuration
+@EnableBatchProcessing
+public class MRLONDEPtranConfig {
+    
+    private static int chunksize;
+    private static String url;
+    private static String user;
+    private static String pwd;
+    private static String key;
+    private static String iv;
+    
+    // 1. Remove the Class-Level Autowired field
+    // @Autowired
+    // private AESEncryptionUtility aesEncryptionUtility; <--- REMOVE THIS
+
+    @SuppressWarnings("static-access")
+    @Autowired
+    public MRLONDEPtranConfig(@Value("${CHUNK_SIZE}") int chunksize,
+                              @Value("${dburl}") String url,
+                              @Value("${dbuser}") String user,
+                              @Value("${dbpwd}") String pwd,
+                              @Value("${Key}") String key,
+                              @Value("${IV}") String iv) {
+        this.chunksize = chunksize;
+        this.url = url;
+        this.pwd = pwd;
+        this.user = user;
+        this.key = key;
+        this.iv = iv;
+    }
+
+    // ... other autowired fields (JobBuilderFactory, etc) remain ...
+
+    // 2. Update the dataSource method to accept the Utility as a parameter
+    @Bean
+    public DataSource dataSource(AESEncryptionUtility aesUtil) { 
+        String urlOG = "";
+        String userName = "";
+        String password = "";
+        
+        try {
+            // Use the passed instance 'aesUtil'
+            urlOG = aesUtil.aesDecrypt(key, iv, url);
+            userName = aesUtil.aesDecrypt(key, iv, user);
+            password = aesUtil.aesDecrypt(key, iv, pwd);
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+        }
+        
+        DataSourceBuilder dataSourceBuilder = DataSourceBuilder.create();
+        dataSourceBuilder.url(urlOG);
+        dataSourceBuilder.username(userName);
+        dataSourceBuilder.password(password);
+        return dataSourceBuilder.build();
+    }
+
+    // ... rest of your code (Job, Step, Reader) ...
+}
