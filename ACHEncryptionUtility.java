@@ -1,192 +1,767 @@
 package com.tcs.sbi.util;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
+import java.security.InvalidAlgorithmParameterException;
+import java.security.InvalidKeyException;
 import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.Security;
+import java.security.Signature;
+import java.security.SignatureException;
+import java.security.UnrecoverableKeyException;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateEncodingException;
+import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.sql.Timestamp;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.Date;
+import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
+import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.NoSuchPaddingException;
 import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
-
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.transform.OutputKeys;
+import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerConfigurationException;
+import javax.xml.transform.TransformerException;
+import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.dom.DOMSource;
+import javax.xml.transform.stream.StreamResult;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.bouncycastle.bcpg.ArmoredOutputStream;
+import org.bouncycastle.cert.jcajce.JcaCertStore;
+import org.bouncycastle.cms.CMSException;
+import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSSignedData;
+//import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.CMSSignedDataGenerator;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.SignerInformationStore;
+import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
+import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.openpgp.PGPCompressedData;
 import org.bouncycastle.openpgp.PGPCompressedDataGenerator;
 import org.bouncycastle.openpgp.PGPEncryptedData;
 import org.bouncycastle.openpgp.PGPEncryptedDataGenerator;
+import org.bouncycastle.openpgp.PGPEncryptedDataList;
+import org.bouncycastle.openpgp.PGPException;
 import org.bouncycastle.openpgp.PGPLiteralData;
-import org.bouncycastle.openpgp.PGPLiteralDataGenerator;
+import org.bouncycastle.openpgp.PGPObjectFactory;
+import org.bouncycastle.openpgp.PGPOnePassSignatureList;
 import org.bouncycastle.openpgp.PGPPrivateKey;
 import org.bouncycastle.openpgp.PGPPublicKey;
+import org.bouncycastle.openpgp.PGPPublicKeyEncryptedData;
 import org.bouncycastle.openpgp.PGPSignature;
 import org.bouncycastle.openpgp.PGPSignatureGenerator;
 import org.bouncycastle.openpgp.PGPUtil;
+import org.bouncycastle.openpgp.operator.PGPContentSignerBuilder;
+import org.bouncycastle.openpgp.operator.PublicKeyDataDecryptorFactory;
+import org.bouncycastle.openpgp.operator.jcajce.JcaKeyFingerprintCalculator;
 import org.bouncycastle.openpgp.operator.jcajce.JcaPGPContentSignerBuilder;
-import org.bouncycastle.openpgp.operator.jcajce.JcaPGPKeyConverter;
-import org.bouncycastle.openpgp.operator.jcajce.JcaPGPKeyPair;
 import org.bouncycastle.openpgp.operator.jcajce.JcePGPDataEncryptorBuilder;
+import org.bouncycastle.openpgp.operator.jcajce.JcePublicKeyDataDecryptorFactoryBuilder;
 import org.bouncycastle.openpgp.operator.jcajce.JcePublicKeyKeyEncryptionMethodGenerator;
+import org.bouncycastle.operator.ContentSigner;   
+import org.bouncycastle.operator.OperatorCreationException;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.xml.sax.SAXException;
 
 import com.tcs.sbi.launcher.ACHEncryptionLuncher;
 
 public class ACHEncryptionUtility {
 
+	@SuppressWarnings("unused")
 	private static final Logger log = LogManager.getLogger(ACHEncryptionLuncher.class);
 
-	/**
-	 * PGP Sign and Encrypt a file using Streams (Low Memory Usage). Output is ASCII
-	 * Armored (.txt).
-	 */
-	public static void signAndEncryptFile(InputStream inputStream, OutputStream outputStream, String fileName,
-			PGPPublicKey encKey, PGPPrivateKey signKey) throws Exception {
-
-		Security.addProvider(new BouncyCastleProvider());
-
-		// 1. Wrap output in ArmoredOutputStream to get .txt (ASCII) output
-		try (ArmoredOutputStream armoredOutputStream = new ArmoredOutputStream(outputStream)) {
-
-			// 2. Init Encryption Generator (AES-256)
-			JcePGPDataEncryptorBuilder encryptorBuilder = new JcePGPDataEncryptorBuilder(PGPEncryptedData.AES_256)
-					.setWithIntegrityPacket(true).setSecureRandom(new SecureRandom()).setProvider("BC");
-
-			PGPEncryptedDataGenerator encryptedDataGenerator = new PGPEncryptedDataGenerator(encryptorBuilder);
-			encryptedDataGenerator.addMethod(new JcePublicKeyKeyEncryptionMethodGenerator(encKey).setProvider("BC"));
-
-			// 3. Init Compression Generator (ZIP)
-			PGPCompressedDataGenerator compressedDataGenerator = new PGPCompressedDataGenerator(PGPCompressedData.ZIP);
-
-			try (
-					// Open Encryption Stream
-					OutputStream encryptedOut = encryptedDataGenerator.open(armoredOutputStream, new byte[4096]);
-					// Open Compression Stream
-					OutputStream compressedOut = compressedDataGenerator.open(encryptedOut)) {
-
-				// 4. Init Signature Generator
-				PGPSignatureGenerator signatureGenerator = new PGPSignatureGenerator(
-						new JcaPGPContentSignerBuilder(signKey.getPublicKeyPacket().getAlgorithm(), PGPUtil.SHA256)
-								.setProvider("BC"));
-
-				signatureGenerator.init(PGPSignature.BINARY_DOCUMENT, signKey);
-
-				// --- REMOVED USER ID BLOCK HERE (Not required for functionality and was causing error) ---
-
-				// Write One-Pass Signature Header
-				signatureGenerator.generateOnePassVersion(false).encode(compressedOut);
-
-				// 5. Init Literal Data Generator (The actual file content)
-				PGPLiteralDataGenerator literalDataGenerator = new PGPLiteralDataGenerator();
-
-				try (OutputStream literalOut = literalDataGenerator.open(compressedOut, PGPLiteralData.BINARY, fileName,
-						new Date(), new byte[4096])) {
-
-					// 6. Read Input File -> Update Signature -> Write to Output
-					byte[] buffer = new byte[4096];
-					int len;
-					while ((len = inputStream.read(buffer)) > 0) {
-						literalOut.write(buffer, 0, len);
-						signatureGenerator.update(buffer, 0, len);
-					}
-				}
-
-				// 7. Generate and Append the Signature
-				signatureGenerator.generate().encode(compressedOut);
-			}
-
-			encryptedDataGenerator.close();
-		}
-	}
-
-	/**
-	 * Convert Standard Java Private Key (from .pfx) to PGP Private Key for Signing.
-	 */
-	public static PGPPrivateKey getPGPPrivateKeyFromPFX(String pfxPath, String password) throws Exception {
-		KeyStore ks = KeyStore.getInstance("PKCS12");
-		try (FileInputStream fis = new FileInputStream(pfxPath)) {
-			ks.load(fis, password.toCharArray());
-		}
-		String alias = ks.aliases().nextElement();
-		java.security.PrivateKey javaPrivateKey = (java.security.PrivateKey) ks.getKey(alias, password.toCharArray());
-		java.security.cert.Certificate javaCert = ks.getCertificate(alias);
-		java.security.PublicKey javaPublicKey = javaCert.getPublicKey();
-
-		JcaPGPKeyPair pgpKeyPair = new JcaPGPKeyPair(PGPPublicKey.RSA_GENERAL,
-				new java.security.KeyPair(javaPublicKey, javaPrivateKey), new Date());
-
-		return pgpKeyPair.getPrivateKey();
-	}
-
-	/**
-	 * Convert Standard Java Public Certificate (from .cer) to PGP Public Key for Encryption.
-	 */
-	public static PGPPublicKey getPGPPublicKeyFromCer(String cerPath) throws Exception {
-		CertificateFactory certFactory = CertificateFactory.getInstance("X.509");
-		java.security.cert.Certificate cert;
-		try (FileInputStream fis = new FileInputStream(cerPath)) {
-			cert = certFactory.generateCertificate(fis);
-		}
-		java.security.PublicKey javaPublicKey = cert.getPublicKey();
-		JcaPGPKeyConverter converter = new JcaPGPKeyConverter();
-		return converter.getPGPPublicKey(PGPPublicKey.RSA_GENERAL, javaPublicKey, new Date());
-	}
-
-	// --- Existing Helpers ---
-
-	public static String aesDecrypt(String key, String initVector, String encrypted) {
-		try {
-			IvParameterSpec iv = new IvParameterSpec(keyToB(initVector));
-			SecretKeySpec skeySpec = new SecretKeySpec(keyToB(key), "AES");
-			Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5PADDING");
-			cipher.init(Cipher.DECRYPT_MODE, skeySpec, iv);
-			byte[] original = cipher.doFinal(Base64.getDecoder().decode(encrypted));
-			return new String(original, "UTF-8");
-		} catch (Exception e) {
-			log.error("Decrypt Error: " + e.getMessage());
-		}
-		return null;
-	}
-
-	public static byte[] keyToB(String key) throws UnsupportedEncodingException {
-		return Base64.getDecoder().decode(key.getBytes("UTF-8"));
+	public static String Filesize(File file) {
+		float c = file.length();
+		int a = Math.round(c);
+		return a + "bytes";
 	}
 
 	public static boolean extensionValidation(String input) {
+
 		String fileExtension = FilenameUtils.getExtension(input);
-		return "txt".equalsIgnoreCase(fileExtension);
+		boolean extensionValidated = true;
+		if (fileExtension.equals("txt")) {
+			extensionValidated = true;
+		} else {
+			extensionValidated = false;
+		}
+		return extensionValidated;
+
 	}
 
+	public static String createAlphaNumericString(int keyLength) {
+
+		SecureRandom rnd = new SecureRandom();
+		StringBuilder sb = new StringBuilder(keyLength);
+		for (int i = 0; i < keyLength; i++) {
+			sb.append(ACHEncryptionLuncher.getALLOWED_CHARS()
+					.charAt(rnd.nextInt(ACHEncryptionLuncher.getALLOWED_CHARS().length())));
+		}
+		return (sb.toString());
+
+	}
+	
+	
+	
+	
+	
 	public static String generateRefrenceNumber() {
+
 		String generateUUIDNo = String.format("%010d",
 				new BigInteger(UUID.randomUUID().toString().replace("-", ""), 16));
-		return "SBIN" + generateUUIDNo.substring(generateUUIDNo.length() - 10);
+		String unique_no = "SBIN" + generateUUIDNo.substring(generateUUIDNo.length() - 10);
+
+		return unique_no;
+
+	}
+	
+
+	public static String rmTrailSpace(String Data) {
+		Data = Data.trim().replaceAll(" +", " ");
+
+		if (Data.equalsIgnoreCase("")) {
+			Data = "-";
+		}
+		Data = Data.toUpperCase();
+		return Data;
+	}
+
+	public static int returnMaxDays(int calMonth) {
+
+		int maxDays = 0;
+
+		if (calMonth == 1) {
+			maxDays = 31;
+		} else if (calMonth == 2) {
+			maxDays = 28;
+		} else if (calMonth == 3) {
+			maxDays = 31;
+		} else if (calMonth == 4) {
+			maxDays = 30;
+		} else if (calMonth == 5) {
+			maxDays = 31;
+		} else if (calMonth == 6) {
+			maxDays = 30;
+		} else if (calMonth == 7) {
+			maxDays = 31;
+		} else if (calMonth == 8) {
+			maxDays = 31;
+		} else if (calMonth == 9) {
+			maxDays = 30;
+		} else if (calMonth == 10) {
+			maxDays = 31;
+		} else if (calMonth == 11) {
+			maxDays = 30;
+		} else {
+			maxDays = 31;
+		}
+		return maxDays;
 	}
 
 	public static Timestamp getTimestamp() {
+		Timestamp timestamp = null;
 		try {
 			SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SS");
 			String strTime = sdf.format(new Date());
-			return Timestamp.valueOf(strTime);
-		} catch (Exception e) {
+			timestamp = Timestamp.valueOf(strTime);
+		} catch (NumberFormatException e) {
+			log.info("Exception in getting Timestamp");
+		}
+		return timestamp;
+	}
+
+	public static HashMap<String, String> rsaDecryptFile(InputStream in, PGPPrivateKey priK, String filename,
+			File decfilePath) {
+		HashMap<String, String> dMap = new HashMap<String, String>();
+
+		dMap.put("FileName", filename);
+		try {
+			Security.addProvider(new BouncyCastleProvider());
+
+			in = org.bouncycastle.openpgp.PGPUtil.getDecoderStream(in);
+			PGPObjectFactory pgpF = new PGPObjectFactory(in, new JcaKeyFingerprintCalculator());
+			PGPEncryptedDataList enc;
+			Object o = pgpF.nextObject();
+
+			if (o instanceof PGPEncryptedDataList) {
+				enc = (PGPEncryptedDataList) o;
+			} else {
+				enc = (PGPEncryptedDataList) pgpF.nextObject();
+
+			}
+
+//			@SuppressWarnings("unchecked")
+//			Iterator<PGPPublicKeyEncryptedData> it = enc.getEncryptedDataObjects();
+//			PGPPrivateKey sKey = null;
+//			PGPPublicKeyEncryptedData pbe = null;
+//
+//			while (sKey == null && it.hasNext()) {
+//				pbe = it.next();
+//				sKey = priK;
+//
+//			}
+			@SuppressWarnings("unchecked")
+			Iterator<PGPEncryptedData> it = enc.getEncryptedDataObjects();
+			PGPPrivateKey sKey = null;
+			PGPPublicKeyEncryptedData pbe = null;
+
+			while (sKey == null && it.hasNext()) {
+				pbe = (PGPPublicKeyEncryptedData) it.next();
+				sKey = priK;
+
+			}
+
+			if (sKey == null) {
+				throw new IllegalArgumentException("Secret key for message not found.");
+			}
+
+			PublicKeyDataDecryptorFactory b = new JcePublicKeyDataDecryptorFactoryBuilder().setProvider("BC")
+					.setContentProvider("BC").build(sKey);
+
+			InputStream clear = pbe.getDataStream(b);
+			PGPObjectFactory plainFact = new PGPObjectFactory(clear, new JcaKeyFingerprintCalculator());
+			clear.close();
+			Object message = plainFact.nextObject();
+
+			if (message instanceof PGPCompressedData) {
+				PGPCompressedData cData = (PGPCompressedData) message;
+				try (InputStream dataStream = cData.getDataStream()) {
+				    PGPObjectFactory pgpFact = new PGPObjectFactory(dataStream, new JcaKeyFingerprintCalculator());
+				    message = pgpFact.nextObject();
+				} 
+			}
+
+			if (message instanceof PGPLiteralData) {
+				PGPLiteralData ld = (PGPLiteralData) message;
+				try (InputStream unc = ld.getInputStream()) {
+				    FileUtils.copyInputStreamToFile(unc, new File(decfilePath + File.separator + filename));
+				}   
+				in.close();
+
+			} else if (message instanceof PGPOnePassSignatureList) {
+				throw new PGPException("Encrypted message contains a signed message - not literal data.");
+			} else {
+				throw new PGPException("Message is not a simple encrypted file - type unknown.");
+			}
+
+			if (pbe.isIntegrityProtected()) {
+				if (!pbe.verify()) {
+					throw new PGPException("Message failed integrity check");
+				}
+			}
+
+		} catch (PGPException e) {
+			dMap.put("Error", "PGPDecryptionError");
+		} catch (NullPointerException e) {
+			dMap.put("Error", "DecryptionError-File not exactly encrypted");
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		return dMap;
+
+	}
+
+	public static PrivateKey getCertKeys(String cerFileStream, String password) throws UnrecoverableKeyException, KeyStoreException, NoSuchAlgorithmException, CertificateException, IOException  {
+
+		KeyStore keyStore = KeyStore.getInstance("PKCS12"); // , "BC");
+		try (FileInputStream fis = new FileInputStream(cerFileStream)) {
+			keyStore.load(fis, password.toCharArray());
+		}
+		String aliase = keyStore.aliases().nextElement();
+		java.security.Key key = keyStore.getKey(aliase, password.toCharArray());
+
+		return (PrivateKey) key;
+	}
+
+	public static PublicKey getPubkeyfrompath(String pupkeypath) {
+		PublicKey pubkey;
+		try {
+			CertificateFactory certfactory = CertificateFactory.getInstance("X.509");
+			Certificate certificate;
+			try (FileInputStream fis = new FileInputStream(pupkeypath)) {
+			    certificate = certfactory.generateCertificate(fis);
+			}    
+			pubkey = certificate.getPublicKey();
+			return pubkey;
+		} catch (IOException | CertificateException e) {
+
 			return null;
 		}
+
 	}
-	
-	public static int returnMaxDays(int calMonth) {
-		if (calMonth == 2) return 28; 
-		if (calMonth == 4 || calMonth == 6 || calMonth == 9 || calMonth == 11) return 30;
-		return 31;
+
+
+	@SuppressWarnings("unused")
+	public static String[] extractalldata(String decfile) {
+		String[] extractedData = new String[3];
+		try {
+			File inputfile = new File(decfile);
+			DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+			 // Secure the parser
+	        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+	        factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+	        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+	        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+			DocumentBuilder docx = factory.newDocumentBuilder();
+			Document doc = docx.parse(inputfile);
+			doc.getDocumentElement().normalize();
+			//Element Rootelement = doc.getDocumentElement();
+
+			Node orgContent = doc.getElementsByTagName("OrgContent").item(0);
+			if (orgContent != null) {
+				extractedData[0] = orgContent.getTextContent();
+			}
+
+			Node signature = doc.getElementsByTagName("Signature").item(0);
+			if (signature != null) {
+				extractedData[1] = signature.getTextContent();
+			}
+
+			Node certificate = doc.getElementsByTagName("Certificate").item(0);
+			if (certificate != null) {
+				extractedData[2] = certificate.getTextContent();
+			}
+
+		} catch (NullPointerException e) {
+			log.info("Exception in extractalldata");
+		} catch (ParserConfigurationException e) {
+			log.info("Exception in extractalldata");
+		} catch (SAXException e) {
+			log.info("Exception in extractalldata");
+		} catch (IOException e) {
+			log.info("Exception in extractalldata");
+		}
+		return extractedData;
 	}
+
+	public static X509Certificate getX509Certificate(byte[] cert) throws CertificateException, IOException {
+		X509Certificate certificate = null;
+
+		try {
+			InputStream stream = new ByteArrayInputStream(cert);
+			CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+			certificate = (X509Certificate) certificateFactory.generateCertificate(stream);
+			stream.close();
+		} catch (CertificateException |IOException e) {
+			log.info("Exception in X509Certificate");
+		}
+
+		return certificate;
+	}
+
+	public static X509Certificate LoadX509Certificate(String nPCICertPath) throws CertificateException, IOException {
+		X509Certificate certificate = null;
+		try (InputStream stream = new BufferedInputStream(new FileInputStream(nPCICertPath))) {
+		    CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+		    certificate = (X509Certificate) certificateFactory.generateCertificate(stream);
+		}
+		
+		return certificate;
+	}
+
+	public static String readorgcontentfromfile(String path, HashMap<String, Object> encdmap) throws IOException {
+
+		String orgcontent = null;
+		StringBuilder str = new StringBuilder();
+		BufferedReader br = new BufferedReader(new FileReader(path));
+		int lineCount = 0;
+		try {
+
+			while ((orgcontent = br.readLine()) != null) {
+
+				str.append(orgcontent);
+				str.append("\r\n");
+				lineCount++;
+			}
+
+			if(lineCount>0){
+				lineCount=lineCount-1;
+			}
+			encdmap.put("totalnoofRecords", lineCount);
+
+		} catch (IOException e) {
+
+			log.info("Exception while reading data from file");
+
+		} finally {
+			br.close();
+
+		}
+
+		return str.toString();
+		// return
+		// Base64.getEncoder().encodeToString(str.toString().getBytes("UTF-8"));
+	}
+
+	public static String signfilecontent(String file, PGPPrivateKey pgpPrivKey, String string)
+			throws PGPException, UnsupportedEncodingException {
+		Security.addProvider(new BouncyCastleProvider());
+		ByteArrayOutputStream os = null;
+		PGPContentSignerBuilder signerbuilder = new JcaPGPContentSignerBuilder(PGPPublicKey.RSA_SIGN, PGPUtil.SHA256);
+		PGPSignatureGenerator signgenrator = new PGPSignatureGenerator(signerbuilder);
+		signgenrator.init(PGPSignature.BINARY_DOCUMENT, pgpPrivKey);
+		try (InputStream in = new BufferedInputStream(new FileInputStream(file))) {
+			os = new ByteArrayOutputStream();
+			try (ArmoredOutputStream amos = new ArmoredOutputStream(os)) {
+				byte[] buffer = new byte[4096];
+				int byteread;
+				while ((byteread = in.read(buffer)) != -1) {
+					signgenrator.update(buffer, 0, byteread);
+
+				}
+				signgenrator.generate().encode(amos);
+
+				return os.toString("UTF-8");
+			}
+		} catch (IOException e) {
+			log.info("Exception in signing file content");
+		}
+		// TODO Auto-generated method stub
+		if (os != null) {
+		    return os.toString("UTF-8");
+		} else {
+		    return null; // or throw a meaningful exception
+		}
+	}
+
+	public static String SignedFilegenrator(String orgcontent, String signature, String certificate, String Filename)
+			throws IOException {
+		StringWriter writer = null;
+		try {
+			DocumentBuilderFactory documentFactory = DocumentBuilderFactory.newInstance();
+			DocumentBuilder documentBuilder = documentFactory.newDocumentBuilder();
+			Document document = documentBuilder.newDocument();
+			document.setXmlStandalone(true);
+			Element root = document.createElement("Envelope");
+			document.appendChild(root);
+			Element originalContentElement = document.createElement("OrgContent");
+			originalContentElement.appendChild(document.createTextNode(orgcontent));
+			root.appendChild(originalContentElement);
+			Element signaturelement = document.createElement("Signature");
+			signaturelement.appendChild(document.createTextNode(signature));
+			root.appendChild(signaturelement);
+			Element certificatelement = document.createElement("Certificate");
+			certificatelement.appendChild(document.createTextNode(certificate));
+			root.appendChild(certificatelement);
+			TransformerFactory transformfact = TransformerFactory.newInstance();
+
+			Transformer transform = transformfact.newTransformer();
+			transform.setOutputProperty(OutputKeys.STANDALONE, "yes");
+			transform.setOutputProperty(OutputKeys.INDENT, "yes");
+			DOMSource domsource = new DOMSource(document);
+			writer = new StringWriter();
+			StreamResult streamresult = new StreamResult(writer);
+			transform.transform(domsource, streamresult);
+			String xmlWriter = writer.toString();
+
+			FileUtils.writeStringToFile(new File(ACHEncryptionLuncher.getSignedFilePath() + File.separator + Filename),
+					xmlWriter);
+
+		} catch (NullPointerException e) {
+			log.info("Exception while signing");
+
+		} catch (TransformerConfigurationException e) {
+			log.info("Exception while signing");
+		} catch (TransformerException e) {
+			log.info("Exception while signing");
+		} catch (ParserConfigurationException e) {
+			log.info("Exception while signing");
+		} finally {
+			writer.close();
+
+		}
+
+		return Filename;
+	}
+
+	public static String base64Certificate(X509Certificate channelPubCert) {
+		String base64encodedCert = "";
+		try {
+			byte[] certificateByte = channelPubCert.getEncoded();
+			base64encodedCert = Base64.getEncoder().encodeToString(certificateByte);
+
+		} catch (CertificateEncodingException e) {
+			log.info("Exception in base64certificate");
+		}
+		return base64encodedCert;
+	}
+
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	public static byte[] signfileContent(String orgcontent, PrivateKey privateKey, X509Certificate cert)
+			throws CertificateEncodingException, OperatorCreationException, CMSException, IOException,
+			InvalidKeyException, SignatureException {
+		Security.addProvider(new BouncyCastleProvider());
+		byte[] contentBytes = orgcontent.getBytes(StandardCharsets.UTF_8);
+
+		CMSSignedDataGenerator cmsgenerator = new CMSSignedDataGenerator();
+		ContentSigner contSign = new JcaContentSignerBuilder("SHA256withRSA").build(privateKey);
+
+		cmsgenerator.addSignerInfoGenerator(
+				new JcaSignerInfoGeneratorBuilder(new JcaDigestCalculatorProviderBuilder().build()).build(contSign,
+						cert));
+		List<Certificate> certList = new ArrayList();
+		certList.add(cert);
+		org.bouncycastle.util.Store certs = new JcaCertStore(certList);
+		cmsgenerator.addCertificates(certs);
+		CMSProcessableByteArray cmsdata = new CMSProcessableByteArray(contentBytes);
+		CMSSignedData cmssignData = cmsgenerator.generate(cmsdata, true);
+
+		try {
+			Signature sign = Signature.getInstance("SHA256withRSA");
+			sign.initSign(privateKey);
+			sign.update(contentBytes);
+
+		} catch (NoSuchAlgorithmException e) {
+			// TODO Auto-generated catch block
+			log.info("Exception in signfilecontent");
+		}
+
+		byte[] signdata = cmssignData.getEncoded();
+
+		// String base64Sign = Base64.getEncoder().encodeToString(signdata);
+
+		return signdata;
+	}
+
+	public static X509Certificate x509certget(String privCerPath, String password) throws KeyStoreException {
+		// TODO Auto-generated method stub
+		Certificate cert = null;
+		KeyStore ks = KeyStore.getInstance("PKCS12");
+		try (FileInputStream ksfile = new FileInputStream(privCerPath)) {
+			ks.load(ksfile, password.toCharArray());
+			String Alias = ks.aliases().nextElement();
+			cert = ks.getCertificate(Alias);
+			if (cert instanceof X509Certificate) {
+				return (X509Certificate) cert;
+			} else {
+
+			}
+		} catch (IOException | NoSuchAlgorithmException | CertificateException e) {
+			log.info("Exception in x509certget");
+
+		}
+		return (X509Certificate) cert;
+	}
+
+	public static byte[] signedWithjavaSignature(String orgcontent, PrivateKey privkey)
+			throws InvalidKeyException, SignatureException, NoSuchAlgorithmException {
+		byte[] contentTosign = orgcontent.getBytes(StandardCharsets.UTF_8);
+
+		Signature sign = Signature.getInstance("SHA256withRSA");
+		sign.initSign(privkey);
+		sign.update(contentTosign);
+
+		return sign.sign();
+	}
+
+	@SuppressWarnings("rawtypes")
+	public static HashMap<String, Object> createCMSsign(String orgcontent, X509Certificate privCert, PrivateKey privKey,
+			HashMap<String, Object> encdmap)
+			throws OperatorCreationException, CertificateEncodingException, CMSException, IOException {
+		byte[] contentTosign = orgcontent.getBytes(StandardCharsets.UTF_8);
+		CMSProcessableByteArray cmsdata = new CMSProcessableByteArray(contentTosign);
+		CMSSignedDataGenerator cmsgenerator = new CMSSignedDataGenerator();
+		ContentSigner contentsigner = null;
+		try {
+			contentsigner = new JcaContentSignerBuilder("SHA256withRSA").build((privKey));
+
+		} catch (NullPointerException e) {
+			encdmap.put("SignError", e.getMessage());
+
+		}
+
+		List<X509Certificate> certList = new ArrayList<>();
+		certList.add(privCert);
+		org.bouncycastle.util.Store certs = new JcaCertStore(certList);
+		cmsgenerator.addSignerInfoGenerator(
+				new JcaSignerInfoGeneratorBuilder(new JcaDigestCalculatorProviderBuilder().build()).build(contentsigner,
+						privCert));
+		cmsgenerator.addCertificates(certs);
+		CMSSignedData cmssigndata = cmsgenerator.generate(cmsdata, false);
+
+		byte[] signeddatabytes = cmssigndata.getEncoded();
+		String signed = org.bouncycastle.util.encoders.Base64.toBase64String(signeddatabytes);
+
+		encdmap.put("Sign", signed);
+
+		return encdmap;
+	}
+
+	public static String signWithCMSSignedDataGenerator(String orgcontent, CMSSignedDataGenerator cmsSignedData) {
+		// TODO Auto-generated method stub
+		byte[] orgconbyte = orgcontent.getBytes();
+		CMSSignedData cmsdataaa = null;
+		byte[] signedcontent = null;
+		CMSProcessableByteArray cmsData = new CMSProcessableByteArray(orgconbyte);
+		try {
+			cmsdataaa = cmsSignedData.generate(cmsData, false);
+		} catch (CMSException e) {
+			// TODO Auto-generated catch block
+			log.info("Exception in signwithcms");
+		}
+		try {
+			if(cmsdataaa!=null) {
+				signedcontent = cmsdataaa.getEncoded();
+			}
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			log.info("Exception in sign with cms");
+		}
+		
+		String base64Signedcontent = Base64.getEncoder().encodeToString(signedcontent);
+		return base64Signedcontent;
+	}
+
+	public static boolean rsaEncryptFile(OutputStream out, String fileName, PGPPublicKey encKey, boolean armor,
+			boolean withIntegrityCheck) throws IOException {
+
+		boolean encrypted = false;
+		OutputStream cOut = null;
+		PGPCompressedDataGenerator comData = null;
+
+		try {
+			Security.addProvider(new BouncyCastleProvider());
+
+			if (armor) {
+				out = new ArmoredOutputStream(out);
+
+			}
+
+			ByteArrayOutputStream bOut = new ByteArrayOutputStream();
+
+			comData = new PGPCompressedDataGenerator(PGPCompressedData.ZIP);
+
+			PGPUtil.writeFileToLiteralData(comData.open(bOut), PGPLiteralData.BINARY, new File(fileName));
+
+			JcePGPDataEncryptorBuilder c = new JcePGPDataEncryptorBuilder(PGPEncryptedData.AES_256)
+					.setWithIntegrityPacket(withIntegrityCheck).setSecureRandom(new SecureRandom()).setProvider("BC");
+
+			PGPEncryptedDataGenerator cPk = new PGPEncryptedDataGenerator(c);
+
+			JcePublicKeyKeyEncryptionMethodGenerator d = new JcePublicKeyKeyEncryptionMethodGenerator(encKey)
+					.setProvider(new BouncyCastleProvider()).setSecureRandom(new SecureRandom());
+
+			cPk.addMethod(d);
+
+			byte[] bytes = bOut.toByteArray();
+
+			cOut = cPk.open(out, bytes.length);
+
+			cOut.write((bytes));
+
+			// Writer outputStreamWriter = new
+			// OutputStreamWriter(cOut,"D:\\Development_Docs\\PGP\\Bulk\\"+fileName);
+
+			// bout.write(cOut);
+			// FileUtils.copyFile(new
+			// File("D:\\Development_Docs\\PGP\\Bulk\\plain-text-common.pgp"),
+			// cOut);
+
+			encrypted = true;
+
+		} catch (IOException | PGPException e) {
+			encrypted = false;
+			log.info("Exception in rsa encrypt");
+		} finally {
+			cOut.close();
+			out.close();
+			comData.close();
+		}
+
+		return encrypted;
+
+	}
+
+	public static String aesDecrypt(String key, String initVector, String encrypted)
+			throws UnsupportedEncodingException {
+		byte[] keyb = keyToB(key);
+		byte[] ivb = keyToB(initVector);
+		String dec = decrypt1(keyb, ivb, encrypted);
+		return dec;
+
+	}
+
+	public static byte[] keyToB(String key) throws UnsupportedEncodingException {
+
+		byte[] keybyte = Base64.getDecoder().decode(key.getBytes("UTF-8"));
+
+		return keybyte;
+	}
+
+	public static String decrypt1(byte[] key, byte[] initVector, String encrypted) {
+		try {
+			IvParameterSpec iv = new IvParameterSpec(initVector);
+			SecretKeySpec skeySpec = new SecretKeySpec(key, "AES");
+			Cipher cipher = Cipher.getInstance("AES/CBC/PKCS5PADDING");
+			cipher.init(Cipher.DECRYPT_MODE, skeySpec, iv);
+			byte[] original = cipher.doFinal(Base64.getDecoder().decode(encrypted));
+	        return new String(original, "UTF-8");
+		} catch (NoSuchAlgorithmException e) {
+		    log.error("Algorithm not found: {}", e);
+		} catch (NoSuchPaddingException e) {
+		    log.error("Padding not found: {}",  e);
+		} catch (InvalidKeyException e) {
+		    log.error("Invalid key: {}", e);
+		} catch (InvalidAlgorithmParameterException e) {
+		    log.error("Invalid algorithm parameter: {}",  e);
+		} catch (IllegalBlockSizeException e) {
+		    log.error("Illegal block size: {}", e);
+		} catch (BadPaddingException e) {
+		    log.error("Bad padding: {}", e);
+		} catch (UnsupportedEncodingException e) {
+		    log.error("Unsupported encoding: {}", e);
+		}
+
+		return null;
+	}
+
 }
