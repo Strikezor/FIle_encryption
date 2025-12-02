@@ -1,24 +1,26 @@
 package com.tcs.sbi.main;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.security.cert.CertificateEncodingException;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Calendar;
 import java.util.HashMap;
-import java.util.Date;
-
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.bouncycastle.cms.CMSException;
+import org.bouncycastle.operator.OperatorCreationException;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -26,134 +28,332 @@ import com.tcs.sbi.constants.ErrrorConstants;
 import com.tcs.sbi.dbConnection.ACH_Manager;
 import com.tcs.sbi.launcher.ACHEncryptionLuncher;
 import com.tcs.sbi.util.ACHEncryptionUtility;
+import com.tcs.sbi.util.CounterClass;
 import com.tcs.sbi.util.SFTPUtility;
 
 public class ACHEncryptionMain implements Runnable {
 
-	private ArrayList<String> fileList;
-	@SuppressWarnings("unused")
-	private String folder;
-	@SuppressWarnings("unused")
-	private String fileNameParam;
+	int testCounter = 0;
+	private ArrayList<String> fileList = new ArrayList<String>();
+	//private CounterClass c = new CounterClass();
+	String folder = new String();
+	int fnum;
+	String fpno;
+	private String fileName;
 
 	public ACHEncryptionMain(ArrayList<String> fileList, String folderName, String fileName) {
+		super();
 		this.fileList = fileList;
+		//this.c = c;
 		this.folder = folderName;
-		this.fileNameParam = fileName;
+
+		this.fileName = fileName;
+
 	}
 
 	private static final Logger log = LogManager.getLogger(ACHEncryptionLuncher.class);
 
 	public void run() {
-		Calendar cal = Calendar.getInstance();
-		int calMonth = cal.get(Calendar.MONTH) + 1;
-		int calYear = cal.get(Calendar.YEAR);
-		int calDate = cal.get(Calendar.DATE);
-		String currMonth = (calMonth < 10) ? "0" + calMonth : "" + calMonth;
-		String currentDate = (calDate < 10) ? "0" + calDate : "" + calDate;
-
-		String fullPath = ACHEncryptionLuncher.getSourcePath();
-
-		if (fileList.size() > 0) {
-			for (String file : fileList) {
-				log.info("Processing File: " + file);
-				HashMap<String, Object> encdmap = new HashMap<>();
-				String referenceNumber = ACHEncryptionUtility.generateRefrenceNumber();
-				encdmap.put("RefrenceNumber", referenceNumber);
-				encdmap.put("FileName", file);
-				encdmap.put("fileCopiedTime", ACHEncryptionUtility.getTimestamp());
-				encdmap.put("FileType", file.contains("-CR-") ? ErrrorConstants.CR_FILE_TYPE.toString() : ErrrorConstants.DR_FILE_TYPE.toString());
-
-				String sourceFile = fullPath + File.separator + file;
-				// Output is .txt (ASCII Armored)
-				String destFile = ACHEncryptionLuncher.getDestinationFilePath() + File.separator + file + ".txt";
-
-				try (
-					InputStream fileInputStream = new BufferedInputStream(new FileInputStream(sourceFile));
-					OutputStream fileOutputStream = new BufferedOutputStream(new FileOutputStream(destFile))
-				) {
-					// --- SINGLE STEP: SIGN & ENCRYPT STREAM ---
-					ACHEncryptionUtility.signAndEncryptFile(
-						fileInputStream,
-						fileOutputStream,
-						file, // Internal filename
-						ACHEncryptionLuncher.getChannelpgpPubkey(), // Encrypt with NPCI Key
-						ACHEncryptionLuncher.getPgpPrivKey()        // Sign with My Key
-					);
-
-					log.info("Encryption Success: " + destFile);
-					
-					// Update DB
-					encdmap.put("Status", ErrrorConstants.ENCRYPTION_SUCCESS.toString());
-					encdmap.put("lastUpdatedtime", ACHEncryptionUtility.getTimestamp());
-					
-					// 1. Move Encrypted file to Backup
-					File encryptedBackup = new File(ACHEncryptionLuncher.getEncryptedBackupPath() + currentDate + currMonth + calYear);
-					if (!encryptedBackup.exists()) encryptedBackup.mkdirs();
-					
-					Path destPathObj = Paths.get(destFile);
-					Files.copy(destPathObj, Paths.get(encryptedBackup + File.separator + file + ".txt"), StandardCopyOption.REPLACE_EXISTING);
-
-					// 2. Handle Upload (CR vs DR)
-					Path finalDestPath;
-					String sftpUploadPath;
-					
-					if (file.contains("CR")) {
-						finalDestPath = Paths.get(ACHEncryptionLuncher.getCrdestfilepath(), file + ".txt");
-						sftpUploadPath = ACHEncryptionLuncher.getOrgndestpathcr();
-					} else {
-						finalDestPath = Paths.get(ACHEncryptionLuncher.getDrdestfilepath(), file + ".txt");
-						sftpUploadPath = ACHEncryptionLuncher.getOrgndestpathdr();
-					}
-
-					Files.copy(destPathObj, finalDestPath, StandardCopyOption.REPLACE_EXISTING);
-					
-					// Upload logic
-					File fileToUpload = finalDestPath.toFile();
-					try (FileInputStream input = new FileInputStream(fileToUpload)) {
-						MultipartFile multipartFile = new MockMultipartFile("file", fileToUpload.getName(), "text/plain", input);
-						
-						if (SFTPUtility.getsftpConnectiontoRemote()) {
-							if (SFTPUtility.upload(sftpUploadPath, multipartFile)) {
-								log.info("SFTP Upload Success");
-								fileToUpload.delete(); // Delete local copy after upload
-							} else {
-								log.info("SFTP Upload Failed");
-							}
-							SFTPUtility.disconnect();
-						}
-					}
-
-					// 3. Move Original Source File to Backup
-					File originalBackup = new File(ACHEncryptionLuncher.getOriginalFileBackupPath() + currentDate + currMonth + calYear);
-					if (!originalBackup.exists()) originalBackup.mkdirs();
-					
-					Files.move(Paths.get(sourceFile), Paths.get(originalBackup + File.separator + file), StandardCopyOption.REPLACE_EXISTING);
-					
-					// 4. Delete Temporary Encrypted File from Destination
-					Files.deleteIfExists(destPathObj);
-
-				} catch (Exception e) {
-					log.error("Encryption Process Failed for " + file, e);
-					
-					// Failure Handling
-					encdmap.put("Status", ErrrorConstants.ENCRYPTION_FAILURE.toString());
-					encdmap.put("ERROR_CODE", ErrrorConstants.ER004.name());
-					
-					File failedPath = new File(ACHEncryptionLuncher.getEncryptionProcessFailed() + currentDate + currMonth + calYear);
-					if (!failedPath.exists()) failedPath.mkdirs();
-					
-					try {
-						Files.move(Paths.get(sourceFile), Paths.get(failedPath + File.separator + file), StandardCopyOption.REPLACE_EXISTING);
-					} catch (IOException io) {
-						log.error("Failed to move file to error folder", io);
-					}
+		try {
+//			@SuppressWarnings("unused")
+//			String successtextfilename = fileName + ".txt";
+			@SuppressWarnings("unused")
+			FileWriter fstream;
+			Calendar cal = Calendar.getInstance();
+			int dTm = 0;
+			cal.add(Calendar.DATE, dTm);
+			String currMonth = "";
+			String currentDate = "";
+			int calMonth = cal.get(Calendar.MONTH) + 1;
+			int calYear = cal.get(Calendar.YEAR);
+			int calDate = cal.get(Calendar.DATE);
+			int maxDays = 0;
+			if (calMonth == 13) {
+				calMonth = 1;
+			}
+			currMonth = calMonth + "";
+			if (currMonth.length() == 1) {
+				currMonth = "0" + calMonth;
+			}
+			if (calYear % 4 == 0) {
+				maxDays = ACHEncryptionUtility.returnMaxDays(calMonth);
+				if (calMonth == 2) {
+					maxDays = 29;
 				}
-
-				// Final DB Update
-				ACH_Manager.insertintoAch_CR_logs(encdmap, new Date());
+			} else {
+				maxDays = ACHEncryptionUtility.returnMaxDays(calMonth);
 
 			}
+			currentDate = (calDate) + "";
+			if (Integer.parseInt(currentDate.trim()) <= maxDays) {
+				if ((currentDate).length() == 1) {
+					currentDate = "0" + (calDate);
+				} else {
+				}
+			} 
+
+			String Fullpath = ACHEncryptionLuncher.getSourcePath();
+			String xmlcontentFileName = null;
+			String Orgcontentencoded = null;
+			boolean armor = true;
+			boolean withIntegrityCheck = true;
+			HashMap<String, Object> encdmap = new HashMap<String, Object>();
+			boolean encrypted = false;
+			String OriginalContent = null;
+			@SuppressWarnings("unused")
+			HashMap<String, Object> Base64EncodesignedData;
+			DateFormat format = new SimpleDateFormat("HH:mm:ss.SS");
+			java.util.Date Date = new java.util.Date();
+			boolean dbupdate;
+			String referenceNumber = null;
+			String OutputFilepath;
+
+			if (fileList.size() > 0) {
+				for (String file : fileList) {
+					log.info(
+							"------------------------------- New File picked up for Signing and Encryption Processing -------------------------------\n");
+
+					try {
+
+						referenceNumber = ACHEncryptionUtility.generateRefrenceNumber();
+
+						encdmap.put("RefrenceNumber", referenceNumber);
+						encdmap.put("FileName", file);
+						encdmap.put("fileCopiedTime", ACHEncryptionUtility.getTimestamp());
+
+						if (file.contains("-CR-")) {
+							encdmap.put("FileType", ErrrorConstants.CR_FILE_TYPE.toString());
+						} else {
+							encdmap.put("FileType", ErrrorConstants.DR_FILE_TYPE.toString());
+						}
+
+						log.info("File to be processed is :" + file + " against reference number : " + referenceNumber);
+
+						OriginalContent = ACHEncryptionUtility.readorgcontentfromfile(Fullpath + File.separator + file,
+								encdmap);
+
+						encdmap.put("FileReadingTime", ACHEncryptionUtility.getTimestamp()); 
+
+						if (OriginalContent != null) {
+							Orgcontentencoded = Base64.getEncoder()
+									.encodeToString(OriginalContent.toString().getBytes("UTF-8"));
+
+							log.info(
+									"File Reading done Successfully and Procced for the signing Process for Reference Number : "
+											+ referenceNumber);
+
+							Base64EncodesignedData = ACHEncryptionUtility.createCMSsign(OriginalContent,
+									ACHEncryptionLuncher.getPrivCert(), ACHEncryptionLuncher.getPrivkey(), encdmap);
+							encdmap=Base64EncodesignedData;
+							if (!encdmap.containsKey("SignError")) {
+
+								xmlcontentFileName = ACHEncryptionUtility.SignedFilegenrator(Orgcontentencoded,
+										encdmap.get("Sign").toString(), ACHEncryptionLuncher.getEncodedpubcert(), file);
+
+								encdmap.put("Status", ErrrorConstants.SIGN_SUCCESS.toString());
+								encdmap.put("statusDEC", ErrrorConstants.SIGN_SUCCESS.name().toString());
+								encdmap.put("lastUpdatedtime", ACHEncryptionUtility.getTimestamp());
+
+								log.info("File signing process done Successfully and Signed file Moved to Path : "
+										+ ACHEncryptionLuncher.getSignedFilePath() + " For Refrence No : "
+										+ referenceNumber);
+								
+								OutputFilepath = ACHEncryptionLuncher.getDestinationFilePath() + File.separator + file;
+								
+								try(OutputStream out = new FileOutputStream(OutputFilepath)){
+
+									encrypted = ACHEncryptionUtility.rsaEncryptFile(out,
+											ACHEncryptionLuncher.getSignedFilePath() + File.separator + xmlcontentFileName,
+											ACHEncryptionLuncher.getChannelpgpPubkey(), armor, withIntegrityCheck);
+									out.close();
+								}
+
+								if (encrypted == true) {
+
+									encdmap.put("Status", ErrrorConstants.ENCRYPTION_SUCCESS.toString());
+									encdmap.put("statusDEC", ErrrorConstants.ENCRYPTION_SUCCESS.name().toString());
+									encdmap.put("lastUpdatedtime", ACHEncryptionUtility.getTimestamp());
+
+									File encryptedBackup = new File(
+											ACHEncryptionLuncher.getEncryptedBackupPath() + currentDate + currMonth + calYear);
+									boolean b=encryptedBackup.mkdirs();
+									if(b==true) {log.info("backup folder created");}
+									Files.copy(
+											Paths.get(ACHEncryptionLuncher.getDestinationFilePath() + File.separator + file)
+													.normalize(),
+											Paths.get(encryptedBackup + File.separator + file).normalize(),
+											StandardCopyOption.REPLACE_EXISTING);
+
+									log.info("File Encryption process done Successfully, Encrypted File Stored in Path : "
+											+ ACHEncryptionLuncher.getDestinationFilePath() + "  For Refrence No : "
+											+ referenceNumber);
+									log.info("Backup of File is Stored in Path : " + encryptedBackup
+											+ "  For Refrence No : " + referenceNumber);
+									
+									Path sourceFilePath = Paths.get(ACHEncryptionLuncher.getDestinationFilePath(), file);
+									if(file.contains("CR")) {
+										Path crDestPath=Paths.get(ACHEncryptionLuncher.getCrdestfilepath(),file);
+										Files.copy(sourceFilePath, crDestPath, StandardCopyOption.REPLACE_EXISTING);
+//										File file2 = new File(ACHEncryptionLuncher.getCrdestfilepath(), file);
+//										MultipartFile multipartFile = null;
+//										try (FileInputStream input = new FileInputStream(file2)) {
+//								            multipartFile = new MockMultipartFile("file", file, "text/plain", input);
+//								        } catch (IOException e) {
+//								            log.info("Exception in converting file to multipart file");
+//								        }
+//										if(SFTPUtility.getsftpConnectiontoRemote()) {
+//											if(SFTPUtility.upload(ACHEncryptionLuncher.getOrgndestpathcr(),multipartFile)) {
+//												log.info("File successfully upload in the final server");
+//												boolean d=file2.delete();
+//												if(d==true) {log.info("orgn file deleted");}
+//											} else {
+//												log.info("File upload failed in the final server");
+//											}
+//											SFTPUtility.disconnect();
+//										} 
+									} else {
+										Path drDestPath=Paths.get(ACHEncryptionLuncher.getDrdestfilepath(),file);
+										Files.copy(sourceFilePath, drDestPath, StandardCopyOption.REPLACE_EXISTING);
+										File file2 = new File(ACHEncryptionLuncher.getDrdestfilepath(), file);
+										MultipartFile multipartFile = null;
+										try (FileInputStream input = new FileInputStream(file2)) {
+								            multipartFile = new MockMultipartFile("file", file, "text/plain", input);
+								        } catch (IOException e) {
+								        	log.info("Exception in converting file to multipart file");
+								        }
+										if(SFTPUtility.getsftpConnectiontoRemote()) {
+											if(SFTPUtility.upload(ACHEncryptionLuncher.getOrgndestpathdr(),multipartFile)) {
+												log.info("File successfully upload in the final server");
+												boolean d=file2.delete();
+												if(d==true) {log.info("orgn file deleted");}
+											} else {
+												log.info("File upload failed in the final server");
+											}
+											SFTPUtility.disconnect();
+										}
+									}
+									
+									File originalFileBackup = new File(ACHEncryptionLuncher.getOriginalFileBackupPath()
+											+ currentDate + currMonth + calYear);
+
+									if (!originalFileBackup.exists()) {
+										boolean b1=originalFileBackup.mkdirs();
+										if(b1==true) {log.info("originalFileBackup folder created");}
+									}
+
+									Files.move(Paths.get(Fullpath + File.separator + file),
+											Paths.get(originalFileBackup + File.separator + file).normalize(),
+											StandardCopyOption.REPLACE_EXISTING);
+									log.info(" After Proccessing, Source File is moved to the Backup Path : "
+											+ originalFileBackup + " For Refrence No : " + referenceNumber);
+
+//									Files.delete(Paths.get(ACHEncryptionLuncher.getSignedFilePath() + File.separator + file)
+//											.normalize());
+//									Files.delete(Paths.get(ACHEncryptionLuncher.getDestinationFilePath() + File.separator + file)
+//											.normalize());
+									log.info("Signed File is deleted after Proccessing from the Path : "
+											+ ACHEncryptionLuncher.getSignedFilePath() + " For Refrence No : "
+											+ referenceNumber);
+
+								}
+
+								else {
+
+									encdmap.put("Status", ErrrorConstants.ENCRYPTION_FAILURE.toString());
+									encdmap.put("statusDEC", ErrrorConstants.ENCRYPTION_FAILURE.name().toString());
+									encdmap.put("ERROR_CODE", ErrrorConstants.ER004.name());
+									encdmap.put("lastUpdatedtime", ACHEncryptionUtility.getTimestamp());
+									File encryptionprocessfailedpath = new File(
+											ACHEncryptionLuncher.getEncryptionProcessFailed() + currentDate + currMonth
+													+ calYear);
+
+									if (!encryptionprocessfailedpath.exists()) {
+										boolean b2=encryptionprocessfailedpath.mkdirs();
+										if(b2==true) {log.info("encryptionprocessfailedpath folder created");}
+									}
+
+									Files.move(Paths.get(Fullpath + File.separator + file),
+											Paths.get(encryptionprocessfailedpath + File.separator + file).normalize(),
+											StandardCopyOption.REPLACE_EXISTING);
+
+									log.info("File Encryption process Failed, Source File moved to the Path : "
+											+ encryptionprocessfailedpath + " For Refrence No : " + referenceNumber);
+								}
+
+
+
+							} else {
+
+								encdmap.put("Status", ErrrorConstants.SIGN_FAILURE.toString());
+								encdmap.put("statusDEC", ErrrorConstants.SIGN_FAILURE.name().toString());
+								encdmap.put("lastUpdatedtime", ACHEncryptionUtility.getTimestamp());
+								File signfailedPath = new File(
+										ACHEncryptionLuncher.getSignGenerationFailed() + currentDate + currMonth + calYear);
+
+								if (!signfailedPath.exists()) {
+									boolean b3=signfailedPath.mkdirs();
+									if(b3==true) {log.info("signfailedPath folder created");}
+								}
+
+								Files.move(Paths.get(Fullpath + File.separator + file),
+										Paths.get(signfailedPath + File.separator + file).normalize(),
+										StandardCopyOption.REPLACE_EXISTING);
+
+								log.info("File signing process failed, file Moved to Path : " + signfailedPath
+										+ " For Refrence No : " + referenceNumber);
+
+							}
+
+							} else {
+
+							encdmap.put("Status", ErrrorConstants.ENCRYPTION_FAILURE.toString());
+							encdmap.put("statusDEC", ErrrorConstants.ENCRYPTION_FAILURE.name().toString());
+							encdmap.put("ERROR_CODE", ErrrorConstants.ER004.name());
+							encdmap.put("lastUpdatedtime", format.format(new java.util.Date()));
+							File filereadingfailed = new File(
+									ACHEncryptionLuncher.getFileReadingFailed() + currentDate + currMonth + calYear);
+
+							if (!filereadingfailed.exists()) {
+								boolean b4=filereadingfailed.mkdirs();
+								if(b4==true) {log.info("filereadingfailed fodler created");}
+							}
+
+							Files.move(Paths.get(Fullpath + File.separator + file),
+									Paths.get(filereadingfailed + File.separator + file).normalize(),
+									StandardCopyOption.REPLACE_EXISTING);
+							log.info("File Reading process failed, file Moved to Path : " + filereadingfailed
+									+ " For Refrence No : " + referenceNumber);
+
+						}
+
+						dbupdate = ACH_Manager.insertintoAch_CR_logs(encdmap, Date);
+						if (dbupdate == true) {
+							log.info("Status updated in DB for FILE : " + file + " and the Reference is Number : "
+									+ referenceNumber);
+						} else {
+
+							log.info("Unable to updated in DB for FILE : " + file + " and the Reference is Number : "
+									+ referenceNumber);
+
+						}
+						encdmap.clear();
+
+					} catch (IOException | CertificateEncodingException | OperatorCreationException | CMSException e) {
+
+						log.info("Error in Encryption main 1st");
+
+					}
+				}
+			} else {
+
+				log.info("No more files found to process");
+			}
+		} catch (NullPointerException e) {
+			log.info("Error in Encryption Main 2nd");
+		} finally {
+
+  			log.info("********** File reading and processing ends here! ****************");
+
 		}
 	}
 }
