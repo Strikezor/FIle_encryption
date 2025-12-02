@@ -1,0 +1,194 @@
+
+NATIONAL PAYMENTS CORPORATION OF INDIA
+NACH Project
+
+File signing and Encryption 
+Version 1.0
+
+
+
+
+
+
+
+
+
+
+		June, 2020
+
+
+ 
+DOCUMENT RELEASE NOTICE
+
+Document details
+Name	Version No.	Date	Description
+NACH file signing and encryption	1.0	2nd June 2020	Provides details of signing and encryption used in ACH platform. 
+
+This document and any revised pages are subject to document control. Please keep them up-to-date using the release notices from the distributor of the document.
+ 
+Table of Contents
+1.	INTRODUCTION	3
+1.1	CURRENT PROCESS:	3
+1.2	PROPOSED PROCESS:	4
+2.	SIGNING AND ENCRYPTION PROCESS	5
+2.1	TRANSACTION FILES	5
+2.2	REPORTS	6
+1.3	DIGITAL CERTIFICATES FOR SIGNING	6
+2.3	DIGITAL FILE SIGNING	6
+2.4	ACH FILE SIGNING USING PKCS#7 SIGNATURE IN JAVA	8
+2.5	PGP ENCRYPTION	9
+
+
+
+
+
+
+
+
+
+
+
+
+
+1.	Introduction
+This document details the requirement of banks to use the NPCI NACH system. The document talks about the digital signing and encryption in NACH
+As per RBI compliance, any personally identifiable information (PII) data that could potentially identify a specific individual needs to be protected. Any information that can be used to distinguish one person from another and can be used for de-anonymizing anonymous data can be considered PII. Sensitive PII is information which, when disclosed, could result in harm to the individual whose privacy has been breached. Sensitive PII should therefore be encrypted in transit and when data is at rest. Such information includes biometric information, medical information, personally identifiable financial information (PIFI) and unique identifiers such as Aadhaar Number, Account Number, Mobile Number, Customer Name etc.
+1.1	 Current Process:
+NPCI and member banks exchange files for processing of NACH financial and non-financial transactions, recon and settlement reports. In the existing process, all the financial and non-financial files are signed using the signing certificate.
+1.2	 Proposed Process:
+All the financial, non-financial transactions files will be digitally signed and encrypted. Reconciliation and settlement reports will be encrypted using PGP encryption standards. This is achieved using public and private key mechanism between member banks and NPCI.
+
+
+ 
+2.	Signing and Encryption process 
+2.1	 Transaction files 
+Transaction files includes financial and non-financial files other than reports processed in NACH. Files should be first digitally signed and then the signed file will be encrypted using Pretty Good Privacy (PGP) encryption program.
+ 
+Source to NPCI
+	Signing Using Private key certificate of the Source Bank
+	Encryption would be done using the public key of the certificate shared by NPCI.
+NPCI to Destination Bank
+	Signing Using Private key certificate of NPCI
+	Encryption would be done using the Public Key of the certificate shared by destination Bank.
+Destination Bank to NPCI
+	Signing Using Private key certificate of Destination Bank
+	Encryption would be done using the Public Key of the certificate shared by NPCI.
+NPCI to Source
+	Signing Using Private key certificate of NPCI
+	Encryption would be done using the Public Key of the certificate shared by the Source bank.
+
+
+
+
+2.2	 Reports
+All the reports sent to the banks will be encrypted using PGP encryption. 
+ 
+NPCI to Banks
+	Encryption would be done using the Public Key of the certificate shared by destination Bank.
+1.3	 Digital Certificates for signing
+1.	Class II certificates for users of ACH and MMS & class III certificated for banks coming through Host-to-Host
+2.	Procure certificates from IDRBT or any of the CAs approved by IDRBT
+3.	Procure standard crypto tokens supporting PKCS#7
+2.3	 Digital File Signing
+The following section provides details of how the file signing and verification needs to be done by the banks for NPCI ACH project. The format needs to be used for all files that are being sent to NPCI ACH system.
+Similarly, for all files received from NPCI ACH system will be digitally signed. Bank needs to validate the signed file using the NPCI certificate using public key.
+The purpose of a digital signature is to ensure data authenticity and that the data is coming from an authentic source. The signature is to be generated based on SHA 256 algorithm. The signature along with data and certificate are to be sent in single file which is an XML envelope.
+Following process is to be followed by the bank and corporates (direct corporate) for signing the file and creating the XML envelope with data, signature and certificate:
+1.	Create signature with original data
+2.	Base 64bit encoding of original data and certificate
+3.	Enveloping all three 64 bit base encoded content (original data, signature and certificate) into single XML file using the below mentioned format.
+4.	The format and tags to be used for the XML envelope is provided below.
+5.	The XML envelope thus generated is then sent across by bank and from ACH.
+
+The XML file will look like - 
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<Envelope>
+	<OrgContent>
+		.
+		.
+	</OrgContent>
+	<Signature>
+		Y7z1Y+c+u80a9vhUSi 
+			.			.
+			.
+		u80a9vhUSi==
+	</Signature>
+	<Certificate>
+		MIIExjCCA66gAwIBAgIJNv5
+			.			.
+			.
+		66gAwIBAgIJNv5=
+	</Certificate>
+</Envelope>
+In the above file structure, the actual data after base 64 encoding is put under “OrgContent” tags of XML envelope.
+Reference - Approach for Creating Signature using Java APIs
+2.4	 ACH File Signing using PKCS#7 Signature in Java
+Steps Involved in Signing:
+Creating Signature
+Java security packages can be used for the signature creation.
+Following are the steps we need to follow for signature creation.
+1.	Use a PKCS keystore (pfx file) (as specified by the certificate vendor)
+2.	Specify  the signature algorithm (SHA256WITHRSA)
+3.	Read the file from system (original file)
+4.	Create an instance of Bouncy Castle's CMSSignedDataGenerator call addSigner API by passing private key, certificate and digest algorithm(SHA256WITHRSA)
+5.	Create an instance of the java.security.Signature class with specified signature algorithm.
+6.	Use initSign method of  java.security.Signature to initiate a signature with the private key of the user (private key extracted from the pfx file)
+7.	Use update method of  java.security.Signature and pass the original file (without Base64 encoded)
+8.	Now use sign method of  java.security.Signature which will return the signature in bytes
+9.	Now encode the signature with Base64 encoder
+10.	Extract the public key certificate from the keystore and encode it to Base64.
+11.	Encode the original file also into Base64.
+
+Signed Envelope has following three components: 
+1. OrgContent- Original data is encoded in Base64.
+2. Signature- Generate detached signed data by using the private key and certificate. SHA256 digest algorithm is used. DER Encoded signed data is retrieved from the signed data and Base64 encoded.
+3. Certificate- Certificate matching the above signer id is retrieved from the store and Base64 encoded.
+Verification of Signed data
+1. Original data and signature data are Base64 decoded. Signer instance is created using both data.
+2. Certificate data is Base64 decoded and passed to the signer for verifying.
+For the verification process to verify whether the data that was sent is authentic and has not been tampered with, the following steps are followed during the verification process:
+1.	The data is received in the form of a XML envelope. The XML file is parsed to get the signature, the original data and the certificate.
+2.	The public key of the certificate and the data is then used to verify the signature.
+3.	If the data has been tampered, the signature verification fails. Thus allowing checking the authenticity of the data.
+4.	Original data can be extracted from the “OrgContent” node in the XML file.
+
+2.5	 PGP Encryption
+Pretty Good Privacy (PGP) is an encryption program that provides cryptographic privacy and authentication for data communication. PGP is used for encrypting, and decrypting files which will be shared with Member Banks from NPCI and Vice-Versa.
+Public and private keys play a vital role in PGP to encrypt and decrypt the data. Public key is used to encrypt the data and private keys issued to decrypt the data. NPCI will share the tool and the Key corresponding to Bank for PGP encryption / Decryption.
+
+Get the PGPPrivateKey and PGPPublicKey from the PKCS keystore (pfx file)  and x.509 certificates respectively for the PGP encryption and decryption process, however pgp internally uses compression and symmetric key encryption process.
+Compression (ZIP) used for the reduce the size of the final output file and symmetric key (AES 256) for faster encryption process.
+ 
+
+
+
+
+
+
+
+
+
+
+
+2.5.1 Encryption and Decryption Coding in java:
+
+Converting public key to PGPpublickey in java:
+
+(new JcaPGPKeyConverter().getPGPPublicKey(PGPPublicKey.RSA_GENERAL, <PublicKey object>, new Date()))
+
+Converting Privatekey to PGPPrivatekey in java:
+
+(new JcaPGPKeyConverter().getPGPPrivateKey(<PublicKey object>, <PrivateKey object>))
+
+Certificate extenstions:
+
+Application would support .CER or *.CRT certificate extensions
+
+Encryption sample code in java:
+
+ 
+
+Decryption sample code in java:
+
+
+ 
