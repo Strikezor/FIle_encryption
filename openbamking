@@ -1,0 +1,56 @@
+package com.tcs.bancs.microservices;
+
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration;
+import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.boot.web.servlet.support.SpringBootServletInitializer;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.Import;
+
+import com.tcs.bancs.microservices.config.CBSDayDbConfig;
+
+
+import springfox.documentation.swagger2.annotations.EnableSwagger2;
+
+
+@SpringBootApplication(exclude =  {
+    DataSourceAutoConfiguration.class, // HibernateJpaAutoConfiguration.class,
+    DataSourceTransactionManagerAutoConfiguration.class}
+, scanBasePackages = "com.tcs.bancs.microservices")
+@ComponentScan(basePackages =  {
+	    "com.tcs.bancs.microservices", "com.tcs.bancs.microservices.configuration", "com.tcs.bancs.microservices.db.model", 
+	    "com.tcs.bancs.microservices.impl", "com.tcs.bancs.microservices.repository.day",
+	     "com.tcs.bancs.microservices.exception", "com.tcs.bancs.microservices.mappings", "com.tcs.bancs.microservices.model",
+	 "com.tcs.bancs.microservices.util","com.tcs.bancs.api", "com.tcs.bancs.microservices.interceptor", "com.tcs.bancs.microservices.api",
+	    "com.tcs.bancs.microservices.services"}
+
+)
+@EnableSwagger2
+@Import({CBSDayDbConfig.class})
+
+public class OpenBankingServicesApp extends SpringBootServletInitializer {
+	
+	Logger logger = LoggerFactory.getLogger(OpenBankingServicesApp.class);
+	private static Logger LOGGER = LoggerFactory.getLogger(OpenBankingServicesApp.class);
+
+    public static void main(String[] args) {
+        if (System.getProperty("ChannelsPropConfigPath") == null) { 
+        	LOGGER.info("Path to config property file is not set! Please set the system variable \"ChannelsPropConfigPath\" with the path to the config file.");
+        	LOGGER.info("Execution Finished with Error!");  
+        }
+        
+       SpringApplication.run(OpenBankingServicesApp.class,args);
+
+    }
+
+    protected SpringApplicationBuilder configure(
+        SpringApplicationBuilder builder) {
+        return builder.sources(OpenBankingServicesApp.class);
+    }
+    
+}
