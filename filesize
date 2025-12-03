@@ -1,0 +1,27 @@
+package com.tcs.bancs.microservices.configuration;
+
+import javax.servlet.*;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.MultipartConfigFactory;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.util.unit.DataSize;
+
+@Configuration
+public class MultipartConfig {
+	 @Value("${mfile}")
+	 private String mfile;
+	 
+	 @Value("${mreq}")
+	 private String mreq;
+ @Bean
+ public MultipartConfigElement MultipartConfigElement() {
+   MultipartConfigFactory factory=new MultipartConfigFactory();;
+	 factory.setMaxFileSize(DataSize.ofMegabytes(Long.parseLong(mfile)));
+	 factory.setMaxRequestSize(DataSize.ofMegabytes(Long.parseLong(mreq)));
+	 return factory.createMultipartConfig();
+	 
+	 
+ }
+}
