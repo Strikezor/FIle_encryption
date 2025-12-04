@@ -1,0 +1,19 @@
+public static String readorgcontentfromfile(String path, HashMap<String, Object> encdmap) throws IOException {
+    File file = new File(path);
+    
+    // 1. Read strict bytes (Do not mess with line endings)
+    byte[] fileBytes = Files.readAllBytes(Paths.get(path));
+    
+    // 2. Convert to String for the XML logic (using UTF-8 is standard)
+    String strictContent = new String(fileBytes, StandardCharsets.UTF_8);
+
+    // 3. Optional: Count lines safely if you still need 'totalnoofRecords' for your logs
+    // This is just for your logging, it doesn't affect the file sent to NPCI
+    int lineCount = 0;
+    try (BufferedReader reader = new BufferedReader(new StringReader(strictContent))) {
+        while (reader.readLine() != null) lineCount++;
+    }
+    encdmap.put("totalnoofRecords", lineCount);
+
+    return strictContent;
+}
